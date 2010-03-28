@@ -1,117 +1,143 @@
 require 'rubygems'
 require 'safariwatir'
 require 'mharris_ext'
+require 'hpricot'
+require 'active_support'
 
-class Object
-  def tap
-    yield(self)
-    self
+def ask(str)
+  puts str
+  STDIN.gets
+end
+
+class String
+  def to_short_name
+    res = gsub(/christopher/i,"chris").gsub(/jeffrey/i,"jeff").gsub(/michael/i,'mike').gsub(/jacob$/i,'jake').gsub(/andrew/i,'andy')
+    res = res.gsub(/clifton/i,'cliff').gsub(/philip/i,'phil').gsub(/joshua/i,'josh').gsub(/matthew/i,'matt').gsub(/maximiliano/i,'max')
+    res = res.gsub(/louis/i,'lou').gsub(/\./,"").gsub(/ jr/i,"").gsub(/howard/i,"howie").gsub(/phillip/i,'phil')
+    res
+  end
+  def validate_comma_name!
+    arr = split(",")
+    raise "bad name #{self}" if arr.size != 2 || arr.any? { |x| x.blank? }
   end
 end
 
-def ie
-  $ie ||= (x = Watir::Safari.new; x.goto("http://pbrl.baseball.cbssports.com/transactions/add-drop"); x)
+class Object
+  def validate_writer_inner(name,&b)
+    define_method("#{name}=") do |arg|
+      raise "bad input to #{name}=, #{arg}" unless b.call(arg)
+      instance_variable_set("@#{name}",arg)
+    end
+  end
+  def validate_writer(*names,&b)
+    names.flatten.each { |x| validate_writer_inner(x,&b) }
+  end
 end
 
 class SourcePlayer
-  attr_accessor :last, :first, :all_pos, :team
-  def initialize(l,f,pos,team)
-    @last,@first,@all_pos,@team = l.strip,f.strip,pos,team.strip
-    self.class.hash[self.name] = self
-  end
-  def main_pos
-    @main_pos ||= all_pos.split(",").first.strip
-  end
-  def pos_list
-    @pos_list ||= all_pos.split(",")
-  end
-  def name
-    @name ||= "#{last}, #{first}"
-  end
-  def option_text
-    @option_text ||= "#{last}, #{first} - #{all_pos} #{team} *"
-  end
-  def select_pos!(pos)
-    ie.select_list(:id,pos).select(option_text)
-    puts "Found #{name} in #{pos}"
-    true
-  rescue
-    return false
-  end
-  def select!
-    pos_list.each { |pos| return if select_pos!(pos) }
-    if already_selected?
-     # puts "Already selected #{name}"
+  attr_accessor :last, :first, :all_pos, :team, :cbs_id
+  validate_writer(:cbs_id) { |x| x =~ /:/ || x.to_i > 0 }
+  validate_writer(:last, :first) { |x| !(x =~ /</ || x =~ /\*/ || x.blank?) }
+  validate_writer(:all_pos) { |x| x.present? }
+  include FromHash
+  def self.from_option_inner(op)
+    if op.innerText =~ Page.regex
+      matches = [$1,$2,$3,$4]
+      new(:last => matches[0].strip, :first => matches[1].gsub(/\*/,"").strip.to_short_name, :all_pos => matches[2], :team => matches[3], :cbs_id => op.get_attribute('value'))
+    elsif op.innerText =~ Page.no_pos_regex
+      new(:last => $1.strip, :first => $2.gsub(/\*/,"").strip.to_short_name, :all_pos => 'U', :team => $3, :cbs_id => op.get_attribute('value'))
+    elsif op.innerText =~ /\*/ || op.innerText =~ /,/
+      raise op.innerText
     else
-      puts "can't find #{name}"
+      nil
     end
   end
-  def already_selected?
-    !!ie.select_list(:id,'team_7').option(:text,option_text[0..-3])
+  def self.from_option(op)
+    res = from_option_inner(op)
+    #raise res.inspect
+    res
   end
-  def self.hash
-    @hash ||= {}
+  fattr(:main_pos) { all_pos.split(",").first.strip }
+  fattr(:pos_list) { all_pos.split(",") }
+  fattr(:name) { "#{last}, #{first}" }
+  def partial_match?(name)
+    a_last, a_first = *name.split(",").map { |x| x.strip.downcase }
+    res = !!(last =~ /#{a_last}/i && first =~ /#{a_first}/i)
   end
-  def self.get(name)
-    hash[name]
+end
+
+
+class Page
+  class << self
+    fattr(:instance) { new }
+    fattr(:regex) { /(.+), (.+) - (\S+) (\S+)/ }
+    fattr(:no_pos_regex) { /(.+), (.+) -  (\S+)/ }
   end
-  def self.select!(name)
-    name = name.gsub(/Christopher/,"Chris").gsub(/Jeffrey/,"Jeff")
-    pl = get(name)
-    if pl
-      pl.select!
-    else
-      puts "can't find #{name}"
+  fattr(:doc) { Hpricot(File.new("source2010.html").read.downcase) }
+  fattr(:options) { doc/"option" }
+  fattr(:players) do
+    options.map { |op| SourcePlayer.from_option(op) }.select { |x| x }
+  end
+  def get_player(name)
+    name.validate_comma_name!
+    pos = nil
+    name, pos = name.split("|").map { |x| x.strip } if name =~ /\|/
+    players.find { |x| x.name.downcase == name.downcase } || get_partial_match_player(name,pos)
+  end
+  def get_partial_match_player(name,pos)
+    res = players.select { |x| x.partial_match?(name) }
+    return res.first if res.size == 1
+    return nil if res.size == 0
+    return nil unless pos
+    res = res.select { |x| x.pos_list.include?(pos) }
+    return res.first if res.size == 1
+    nil
+  end
+  fattr(:team_id_hash) do
+    (doc/"select#team option").inject({}) do |h,op|
+      h.merge(op.innerText.strip => op.get_attribute('value') )
     end
   end
 end
 
-#<option value=1B:8111>Sweeney, Mike - 1B SEA *
-#<option value=1B:392256>Swisher, Nick - 1B,OF NYY *
-def source_player_regex
-  $source_player_regex ||= />(\S+), (\S+) - (\S+) (\S+) */
-end
-
-def get_source_players!
-  File.new("source2009.html").read.scan(source_player_regex).each { |x| SourcePlayer.new(*x) }
-  raise "source players not loaded correctly, size is #{SourcePlayer.hash.size}" unless SourcePlayer.hash.size > 100
-end
-
-def setup!
-  get_source_players!
-  set_team!
+module TeamClass
+  def from_chunk(chunk)
+    lines = chunk.map { |x| x.strip }.select { |x| x.present? }
+    players = lines[1..-1].map { |x| x.to_short_name.downcase }.each { |x| x.validate_comma_name! }
+    Team.new(:player_names => players, :name => lines[0])
+  end
+  def chunks
+    File.new("players2010.txt").read.split("----")
+  end
+  fattr(:all) do
+    chunks.map { |x| from_chunk(x) }.tap { |x| raise "bad size" unless x.size == 12 }
+  end
+  def print_missing_players!
+    all.each do |t|
+      t.missing_players.each do |player|
+        puts "#{t.name}: #{player}"
+      end
+    end
+  end
 end
 
 class Team
-  attr_accessor :players, :team
+  extend TeamClass
+  attr_accessor :player_names, :name
   include FromHash
-  def set_team!
-    puts "setting team #{team}"
-    ie.select_list(:name,'team').select(team)
+  validate_writer(:player_names) { |x| x.size == 33 }
+  fattr(:source_player_hash) do
+    player_names.inject({}) do |h,name|
+      h.merge(name => Page.instance.get_player(name) )
+    end
   end
-  def run!
-    ie.goto("http://pbrl.baseball.cbssports.com/transactions/add-drop")
-    sleep(3)
-    set_team!
-    players.each { |pl| SourcePlayer.select!(pl) }
-    ie.checkbox(:id,'retro').set
-    #ie.button(:value,"   OK   ").click
-    sleep(6)
+  fattr(:source_players) { source_player_hash.values.select { |x| x } }
+  fattr(:missing_players) do
+    source_player_hash.select { |k,v| !v }.map { |x| x[0] }
   end
-end
-
-def teams
-  chunks = File.new("players.txt").read.split("----").map do |chunk|
-    chunk.map { |x| x.strip }.select { |x| x != '' }
-  end
-  chunks.map do |ls|
-    Team.new(:players => ls[1..-1], :team => ls[0])
+  fattr(:cbs_id) do
+    Page.instance.team_id_hash[name.downcase].tap { |x| raise "no id for #{name}" unless x.present? }
   end
 end
 
-get_source_players!
-teams.each do |t|
-  t.run!
-  STDIN.gets
-end
-  
+Team.print_missing_players!
