@@ -1,0 +1,5 @@
+- Team.each_id_str do |team,id_str,id_str_num,player_str,h|
+  = erb :form, :locals => {:team => team, :id_str => id_str, :id_str_num => id_str_num, :player_str => player_str, :pos_hash => h}
+- Team.missing_players.each do |player|
+  = player
+  %br

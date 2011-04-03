@@ -1,0 +1,13 @@
+SS	SS:392862
+drop_action	drop
+dummy::form	1
+form::effective_point	1
+form::faab_bid_amount	
+form::form	form
+form::original_effective_point	20100404
+form::to_add	SS:392862
+form::to_drop	
+team	7
+
+with a pipe
+

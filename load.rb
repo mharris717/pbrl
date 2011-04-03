@@ -41,13 +41,14 @@ class SourcePlayer
   validate_writer(:all_pos) { |x| x.present? }
   include FromHash
   def self.from_option_inner(op)
+    return nil if op.get_attribute('value').to_s == '0'
     if op.innerText =~ Page.regex
       matches = [$1,$2,$3,$4]
       new(:last => matches[0].strip, :first => matches[1].gsub(/\*/,"").strip.to_short_name, :all_pos => matches[2], :team => matches[3], :cbs_id => op.get_attribute('value'))
     elsif op.innerText =~ Page.no_pos_regex
       new(:last => $1.strip, :first => $2.gsub(/\*/,"").strip.to_short_name, :all_pos => 'U', :team => $3, :cbs_id => op.get_attribute('value'))
     elsif op.innerText =~ /\*/ || op.innerText =~ /,/
-      raise op.innerText
+      raise op.inspect
     else
       nil
     end
@@ -112,10 +113,17 @@ module TeamClass
   fattr(:all) do
     chunks.map { |x| from_chunk(x) }.tap { |x| raise "bad size" unless x.size == 12 }
   end
-  def print_missing_players!
+  def missing_players
+    all.map do |t|
+      t.missing_players.map { |x| "#{t.name}: #{x}" }
+    end.flatten
+  end
+  def each_id_str
     all.each do |t|
-      t.missing_players.each do |player|
-        puts "#{t.name}: #{player}"
+      t.id_strs.each_with_index do |str,i|
+        ids = str.split("|")
+        h = ids.group_by { |x| x.split(":").first }.map_value { |v| v.join("|") }
+        yield(t,str,i,t.id_player_strs[i],h)
       end
     end
   end
@@ -138,6 +146,26 @@ class Team
   fattr(:cbs_id) do
     Page.instance.team_id_hash[name.downcase].tap { |x| raise "no id for #{name}" unless x.present? }
   end
+  def players_with_valid_ids
+    source_players.select { |x| x.cbs_id =~ /:/ }
+  end
+  def valid_ids
+    players_with_valid_ids.map { |x| x.cbs_id }
+  end
+  def invalid_ids
+    source_players.map { |x| x.cbs_id }.reject { |x| x =~ /:/ }
+  end
+  def id_strs(ids = valid_ids)
+    return [] if !ids || ids.empty?
+    res = ids[0...12].join("|")
+    [res] + id_strs(ids[12..-1])
+  end
+  def id_player_strs(ids = players_with_valid_ids.map { |x| x.name })
+    return [] if !ids || ids.empty?
+    res = ids[0...12].join(" | ")
+    [res] + id_strs(ids[12..-1])
+  end
 end
 
-Team.print_missing_players!
+# puts Team.all[1].invalid_ids.inspect
+# Team.all[1].id_strs.each { |x| puts x; puts "" }

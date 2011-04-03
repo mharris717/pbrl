@@ -1,0 +1,19 @@
+<h2><%= "#{team.name} #{id_str_num}" %></h2>
+<%= player_str %>
+<form action="http://pbrl.baseball.cbssports.com/transactions/add-drop" method='post' target='_blank'>
+  ID<input name='form::to_add' value='<%= id_str %>' size=200><br>
+  <input type='hidden' name='drop_action' value='drop'>
+  <input type='hidden' name='dummy::form' value='1'>
+  <input type='hidden' name='form::effective_point' value='1'>
+  <input type='hidden' name='form::faab_bid_amount' value=''>
+  <input type='hidden' name='form::form' value='form'>
+  <input type='hidden' name='form::original_effective_point' value='20100404'>
+  <input type='hidden' name='form::to_drop' value=''>
+  <input type='hidden' name='form::retro' value='on'>
+  <input type='hidden' name='team' value='<%= team.cbs_id %>'>
+  <input type='hidden' name='xurl' value='http://google.com'>
+  <% if false %><% pos_hash.each do |pos,idstr| %>
+    <input name='<%= pos %>' value='<%= idstr %>'>
+  <% end %><% end %>
+  <input type='submit'>
+</form>
